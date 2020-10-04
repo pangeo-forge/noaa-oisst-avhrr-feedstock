@@ -1,5 +1,6 @@
-# terraclimate-feedstock
-A pangeo-smithy repository for the terraclimate dataset.
+# noaa-oisst-avhrr-feedstock
+
+A pangeo-smithy repository for the NOAA OISST AVHRR dataset.
 
 ## Notes
 
@@ -39,7 +40,7 @@ $ gcloud iam service-accounts create pangeo-forge --display-name=pangeo-forge --
 Created service account [pangeo-forge].
 ```
 
-2. 
+2.
 
 ```console
 $ gcloud iam service-accounts add-iam-policy-binding \
