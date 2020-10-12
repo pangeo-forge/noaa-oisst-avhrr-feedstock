@@ -7,7 +7,7 @@ spec:
   serviceAccountName: pangeo-forge
   serviceAccount: pangeo-forge
   containers:
-  - image: pangeoforge/terraclimate
+  - image: pangeoforge/noaa-oisst-avhrr
     imagePullPolicy: Always
     args: [dask-worker, --no-bokeh, --death-timeout, '60']
     name: dask-worker
