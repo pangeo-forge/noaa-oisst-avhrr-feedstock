@@ -4,6 +4,7 @@ from typing import List
 
 import dask
 import fsspec
+import pandas as pd
 import xarray as xr
 from numcodecs import Blosc
 from pangeo_forge.pipelines.base import AbstractPipeline
