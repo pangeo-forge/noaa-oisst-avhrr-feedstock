@@ -2,7 +2,6 @@ import os
 from datetime import timedelta
 from typing import List
 
-import dask
 import fsspec
 import pandas as pd
 import xarray as xr
@@ -10,7 +9,7 @@ from numcodecs import Blosc
 from pangeo_forge.pipelines.base import AbstractPipeline
 from pangeo_forge.tasks.http import download
 from pangeo_forge.utils import chunked_iterable
-from prefect import Flow, task, unmapped
+from prefect import Flow, task
 from prefect.environments import DaskKubernetesEnvironment
 from prefect.environments.storage import Docker
 
@@ -123,10 +122,10 @@ class OISSTPipeline(AbstractPipeline):
 
         with Flow(self.name, storage=self.storage, environment=self.environment) as _flow:
             # download to cache
-            nc_sources = download.map(
-                self.sources,
-                cache_location=unmapped(self.cache_location),
-            )
+            nc_sources = [
+                download(x, cache_location=self.cache_location)
+                for x in self.sources
+            ]
 
             first = True
             write_tasks = []
@@ -134,7 +133,8 @@ class OISSTPipeline(AbstractPipeline):
                 write_task = combine_and_write(source_group, self.target_location, self.concat_dim, first=first)
                 write_tasks.append(write_task)
                 first = False
-            cm = consolidate_metadata(target_path)
+            cm = consolidate_metadata(target_location)
+            print(cm)
 
         return _flow
 
