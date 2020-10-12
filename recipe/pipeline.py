@@ -111,7 +111,7 @@ class OISSTPipeline(AbstractPipeline):
             "{yyyymm}/oisst-avhrr-v02r01.{yyyymmdd}.nc"
         )
         source_urls = [
-            source_url_pattern.format(yyyymm=key.strftime("%Y%m"), yyyymmdd=key.strftime("%Y%m%d"))
+            source_url_pattern.format(yyyymm=day.strftime("%Y%m"), yyyymmdd=day.strftime("%Y%m%d"))
             for day in self.days
         ]
 
