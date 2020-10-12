@@ -171,7 +171,7 @@ class OISSTPipeline(AbstractPipeline):
 
 
 # why are we calling this in the recipe file?
-pipeline = TerraclimatePipeline(cache_location, target_location, variables, years)
+pipeline = OISSTPipeline(cache_location, target_location, variables, days)
 # feel like this should happen in the runtime, not in the recipe definiton
 
 
