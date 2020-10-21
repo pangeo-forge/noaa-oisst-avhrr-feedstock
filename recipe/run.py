@@ -87,7 +87,7 @@ def consolidate_metadata(writes: List[str], target: str) -> None:
 class Pipeline(AbstractPipeline):
 
     # Pipeline constants
-    repo = "TomAugspurger/noaa-oisst-avhrr-feedstock/"
+    repo = "TomAugspurger/noaa-oisst-avhrr-feedstock"
     name = "noaa-oisst-avhrr-tom"
     concat_dim = "time"
     files_per_chunk = 5
