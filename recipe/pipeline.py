@@ -1,26 +1,21 @@
 import os
 from datetime import timedelta
-from typing import List
 
 import fsspec
-import pandas as pd
 import xarray as xr
 from numcodecs import Blosc
 from pangeo_forge.pipelines.base import AbstractPipeline
-from pangeo_forge.tasks.http import download
 from pangeo_forge.utils import chunked_iterable
 from prefect import Flow, task
-from prefect.environments import DaskKubernetesEnvironment
-from prefect.environments.storage import Docker
+import zarr
 
-# options
-name = "noaa-oisst-avhrr"
-cache_location = f"gs://pangeo-forge-scratch/cache/{name}.zarr"
-target_location = f"gs://pangeo-forge-scratch/{name}.zarr"
+# # options
+# cache_location = f"gs://pangeo-forge-scratch/cache/{name}.zarr"
+# target_location = f"gs://pangeo-forge-scratch/{name}.zarr"
 
 
-days = pd.date_range("1981-09-01", "1981-09-10", freq="D")
-variables = ['anom', 'err', 'ice', 'sst']
+# days = pd.date_range("1981-09-01", "1981-09-10", freq="D")
+# variables = ['anom', 'err', 'ice', 'sst']
 
 
 def get_encoding(ds):
@@ -67,7 +62,7 @@ def combine_and_write(sources, target, append_dim, first=True):
     # "trying to read from a closed file"
     # but they seem to have gone away for now
     double_open_files = [fsspec.open(url).open() for url in sources]
-    ds = xr.open_mfdataset(double_open_files, combine="nested", concat_dim=concat_dim)
+    ds = xr.open_mfdataset(double_open_files, combine="nested", concat_dim=append_dim)
     # by definition, this should be a contiguous chunk
     ds = ds.chunk({append_dim: len(sources)})
 
@@ -82,19 +77,21 @@ def combine_and_write(sources, target, append_dim, first=True):
 
 @task
 def consolidate_metadata(target):
+    # XXX: This seems to fail for empty input.
     mapper = fsspec.get_mapper(target)
     zarr.consolidate_metadata(mapper)
 
 
-class OISSTPipeline(AbstractPipeline):
+class Pipeline(AbstractPipeline):
 
     # what properies should be class variables
     concat_dim = "time"
     files_per_chunk = 5
+    repo = "pangeo-forge/noaa-oisst-avhrr-feedstock/"
+    name = "noaa-oisst-avhrr"
 
     # vs runtime parameters?
     def __init__(self, cache_location, target_location, variables, days):
-        self.name = name
         self.days = days
         # these two feel like they should be set by the runtime
         self.cache_location = cache_location
@@ -120,7 +117,7 @@ class OISSTPipeline(AbstractPipeline):
     @property
     def flow(self):
 
-        with Flow(self.name, storage=self.storage, environment=self.environment) as _flow:
+        with Flow(self.name) as _flow:
             # download to cache
             nc_sources = [
                 download(x, cache_location=self.cache_location)
@@ -133,8 +130,7 @@ class OISSTPipeline(AbstractPipeline):
                 write_task = combine_and_write(source_group, self.target_location, self.concat_dim, first=first)
                 write_tasks.append(write_task)
                 first = False
-            cm = consolidate_metadata(target_location)
-            print(cm)
+            consolidate_metadata(self.target_location)
 
         return _flow
 
@@ -142,45 +138,3 @@ class OISSTPipeline(AbstractPipeline):
     @property
     def targets(self):
         return [self.target_location]
-
-
-    # Very confusing to have this in the middle of the recipe!
-    # Feels totally out of place.
-    @property
-    def environment(self):
-        environment = DaskKubernetesEnvironment(
-            min_workers=1, max_workers=30,
-            scheduler_spec_file="recipe/job.yaml",
-            worker_spec_file="recipe/worker_pod.yaml",
-        )
-        return environment
-
-    @property
-    def storage(self):
-        storage = Docker(
-            "pangeoforge",
-            dockerfile="recipe/Dockerfile",
-            prefect_directory="/home/jovyan/prefect",
-            python_dependencies=[
-                "git+https://github.com/pangeo-forge/pangeo-forge@master",
-                "prefect==0.13.6",
-            ],
-            image_tag="latest",
-        )
-        return storage
-
-
-# why are we calling this in the recipe file?
-pipeline = OISSTPipeline(cache_location, target_location, variables, days)
-# feel like this should happen in the runtime, not in the recipe definiton
-
-
-if __name__ == "__main__":
-    pipeline.flow.validate()
-
-    print(pipeline.flow)
-    print(pipeline.flow.environment)
-    print(pipeline.flow.parameters)
-    print(pipeline.flow.sorted_tasks())
-    print("Registering Flow")
-    pipeline.flow.register(project_name="pangeo-forge")
