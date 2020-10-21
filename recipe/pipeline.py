@@ -92,7 +92,7 @@ class Pipeline(AbstractPipeline):
 
     # Flow parameters
     days = Parameter(
-        "days", default=pd.date_range("1981-09-01", "1981-09-10", freq="D")
+        "days", default=list(pd.date_range("1981-09-01", "1981-09-10", freq="D"))
     )
     variables = Parameter("variables", default=["anom", "err", "ice", "sst"])
     cache_location = Parameter(
