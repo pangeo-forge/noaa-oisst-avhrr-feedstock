@@ -51,18 +51,17 @@ def combine_and_write(sources: List[str], target: str, concat_dim: str) -> List[
 
 
 @task
-def source_url(day: datetime.datetime) -> str:
+def source_url(day: str) -> str:
     """
     Format the URL for a specific day.
     """
+    day = pd.Timestamp(day)
     source_url_pattern = (
         "https://www.ncei.noaa.gov/data/"
         "sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/"
-        "{yyyymm}/oisst-avhrr-v02r01.{yyyymmdd}.nc"
+        "{day:%Y%m}/oisst-avhrr-v02r01.{day:%Y%m%d}.nc"
     )
-    return source_url_pattern.format(
-        yyyymm=day.strftime("%Y%m"), yyyymmdd=day.strftime("%Y%m%d")
-    )
+    return source_url_pattern.format(day=day)
 
 
 @task
@@ -92,7 +91,7 @@ class Pipeline(AbstractPipeline):
 
     # Flow parameters
     days = Parameter(
-        "days", default=list(pd.date_range("1981-09-01", "1981-09-10", freq="D"))
+        "days", default=pd.date_range("1981-09-01", "1981-09-10", freq="D").strftime("%Y-%m-%d").tolist()
     )
     variables = Parameter("variables", default=["anom", "err", "ice", "sst"])
     cache_location = Parameter(
