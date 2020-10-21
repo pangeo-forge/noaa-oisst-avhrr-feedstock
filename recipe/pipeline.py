@@ -1,92 +1,128 @@
-import os
-from datetime import timedelta
-
 import fsspec
+import datetime
+from prefect import Parameter, unmapped
+from typing import List
 import xarray as xr
-from numcodecs import Blosc
 from pangeo_forge.pipelines.base import AbstractPipeline
 from pangeo_forge.utils import chunked_iterable
 from pangeo_forge.tasks.http import download
 from prefect import Flow, task
 import zarr
-
-# # options
-# cache_location = f"gs://pangeo-forge-scratch/cache/{name}.zarr"
-# target_location = f"gs://pangeo-forge-scratch/{name}.zarr"
-
-
-# days = pd.date_range("1981-09-01", "1981-09-10", freq="D")
-# variables = ['anom', 'err', 'ice', 'sst']
-
+import pandas as pd
 
 
 @task
-def combine_and_write(sources, target, append_dim, first=True):
-    double_open_files = [fsspec.open(url).open() for url in sources]
-    ds = xr.open_mfdataset(double_open_files, combine="nested", concat_dim=append_dim)
-    # by definition, this should be a contiguous chunk
-    ds = ds.chunk({append_dim: len(sources)})
+def chunk(sources, size):
+    # TODO: move to pangeo_forge.
+    return list(chunked_iterable(sources, size))
 
-    if first:
+
+@task
+def combine_and_write(sources: List[str], target: str, concat_dim: str) -> List[str]:
+    """
+    Write a batch of intermediate files to a combined zarr store.
+
+    Parameters
+    ----------
+    sources : List[str]
+        A list of URLs pointing to the intermediate files.
+    target : str
+        The URL for the target combined store.
+    concat_dim : str
+        The dimension to concatenate along.
+
+    Returns
+    -------
+    target : str
+        The URL of the written combined Zarr store (same as target).k
+    """
+    double_open_files = [fsspec.open(url).open() for url in sources]
+    ds = xr.open_mfdataset(double_open_files, combine="nested", concat_dim=concat_dim)
+    # by definition, this should be a contiguous chunk
+    ds = ds.chunk({concat_dim: len(sources)})
+    mapper = fsspec.get_mapper(target)
+
+    if not len(mapper):
         kwargs = dict(mode="w")
     else:
-        kwargs = dict(mode="a", append_dim=append_dim)
-    mapper = fsspec.get_mapper(target)
+        kwargs = dict(mode="a", append_dim=concat_dim)
     ds.to_zarr(mapper, **kwargs)
+    return target
 
 
 @task
-def consolidate_metadata(target):
+def source_url(day: datetime.datetime) -> str:
+    """
+    Format the URL for a specific day.
+    """
+    source_url_pattern = (
+        "https://www.ncei.noaa.gov/data/"
+        "sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/"
+        "{yyyymm}/oisst-avhrr-v02r01.{yyyymmdd}.nc"
+    )
+    return source_url_pattern.format(
+        yyyymm=day.strftime("%Y%m"), yyyymmdd=day.strftime("%Y%m%d")
+    )
+
+
+@task
+def consolidate_metadata(writes: List[str], target: str) -> None:
+    """
+    Consolidate the metadata the Zarr group at `target`.
+
+    Parameters
+    ----------
+    writes : List[str]
+        The URLs the combined stores were written to. This is only a
+        parameter to introduce a dependency. The actual value isn't used.
+    target : str
+        The URL for the (combined) Zarr group.
+    """
     mapper = fsspec.get_mapper(target)
     zarr.consolidate_metadata(mapper)
 
 
 class Pipeline(AbstractPipeline):
 
-    concat_dim = "time"
-    files_per_chunk = 5
+    # Pipeline constants
     repo = "pangeo-forge/noaa-oisst-avhrr-feedstock/"
     name = "noaa-oisst-avhrr"
+    concat_dim = "time"
+    files_per_chunk = 5
 
-    def __init__(self, cache_location, target_location, variables, days):
-        self.days = days
-        self.cache_location = cache_location
-        self.target_location = target_location
+    # Flow parameters
+    days = Parameter(
+        "days", default=pd.date_range("1981-09-01", "1981-09-10", freq="D")
+    )
+    variables = Parameter("variables", default=["anom", "err", "ice", "sst"])
+    cache_location = Parameter(
+        "cache_location", default=f"gs://pangeo-forge-scratch/cache/{name}.zarr"
+    )
+    target_location = Parameter(
+        "target_location", default=f"gs://pangeo-forge-scratch/{name}.zarr"
+    )
 
     @property
     def sources(self):
-        source_url_pattern = (
-            "https://www.ncei.noaa.gov/data/"
-            "sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/"
-            "{yyyymm}/oisst-avhrr-v02r01.{yyyymmdd}.nc"
-        )
-        source_urls = [
-            source_url_pattern.format(yyyymm=day.strftime("%Y%m"), yyyymmdd=day.strftime("%Y%m%d"))
-            for day in self.days
-        ]
-
-        return source_urls
-
-    @property
-    def flow(self):
-
-        with Flow(self.name) as _flow:
-            nc_sources = [
-                download(x, cache_location=self.cache_location)
-                for x in self.sources
-            ]
-
-            first = True
-            write_tasks = []
-            for source_group in chunked_iterable(nc_sources, self.files_per_chunk):
-                write_task = combine_and_write(source_group, self.target_location, self.concat_dim, first=first)
-                write_tasks.append(write_task)
-                first = False
-            consolidate_metadata(self.target_location)
-
-        return _flow
-
+        # XXX: remote from base class?
+        pass
 
     @property
     def targets(self):
-        return [self.target_location]
+        # XXX: remove from base class?
+        return None
+
+    @property
+    def flow(self):
+        with Flow(self.name) as _flow:
+            sources = source_url.map(self.days)
+            nc_sources = download.map(
+                sources, cache_location=unmapped(self.cache_location)
+            )
+            chunked = chunk(nc_sources, size=self.files_per_chunk)
+            writes = combine_and_write.map(
+                chunked, unmapped(self.target_location), unmapped(self.concat_dim)
+            )
+            consolidate_metadata(writes, self.target_location)
+
+        return _flow
